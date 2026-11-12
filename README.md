@@ -106,9 +106,15 @@ npm test
 
 ## Deploy
 
-Build ra `dist/` là thư mục tĩnh, `base: './'` nên chạy được ở bất kỳ thư mục con nào:
+Build ra `dist/` là thư mục tĩnh, `base: './'` nên chạy được ở bất kỳ thư mục con nào.
+
+**GitHub Pages (đã bật sẵn)**: workflow `.github/workflows/deploy-pages.yml` chạy test → build → publish
+mỗi lần push lên `main`. Site: **https://accessflows.github.io/pdf-to-docx/** — không cần cấu hình gì thêm.
 
 - **Netlify / Vercel / Cloudflare Pages**: build command `npm run build`, publish directory `dist`.
-- **GitHub Pages**: push `dist/` lên nhánh `gh-pages`.
+- **Tự host**: copy `dist/` lên bất kỳ web server tĩnh nào.
 
 Không cần cấu hình CORS hay bất kỳ biến môi trường nào.
+
+Test chạy trên Node dùng **legacy build** của pdf.js (alias trong `vitest.config.ts`) vì bản browser cần
+`Promise.try` / `Uint8Array#toHex` mà Node chưa có đủ; app thật vẫn dùng bản browser nhẹ hơn.
