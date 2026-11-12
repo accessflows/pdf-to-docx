@@ -19,6 +19,7 @@ const zh: Record<MessageKey, string> = {
   'field.autoStart': '添加文件后自动转换',
 
   'mode.text': '文字（可编辑）',
+  'mode.layout': '精确版式（按原位置固定）',
   'mode.visual': '图片（保持页面原样）',
 
   'scale.72': '72 dpi（体积小）',
@@ -74,7 +75,7 @@ const zh: Record<MessageKey, string> = {
 
   'footnote.title': '提示：',
   'footnote.body':
-    '文件通过 JavaScript 在您的设备上处理。文字模式会保留内容、图片和基本格式，但无法重建表格或复杂排版 —— 需要与原件 100% 一致时请使用图片模式。整页只有一张大图的页面（书籍封面、扫描页）会以图片形式保留。首次使用 OCR 时会从 CDN 下载语言数据（约 5–15 MB）。',
+    '文件通过 JavaScript 在您的设备上处理。精确版式把每一行固定在 PDF 中的原位置，文字模式会重新整理成更整洁的段落，图片模式让页面像素级一致。整页只有一张大图的页面（书籍封面、扫描件）会以图片形式保留。首次使用 OCR 时会从 CDN 下载语言数据（约 5–15 MB）。',
 
   'warning.blankPages':
     '以下页面没有文字层（扫描版 PDF），已留空：{pages}。开启 OCR 即可转换这些页面。',

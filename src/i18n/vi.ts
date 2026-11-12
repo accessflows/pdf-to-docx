@@ -20,6 +20,7 @@ const vi: Record<MessageKey, string> = {
   'field.autoStart': 'Tự động chuyển khi thêm file',
 
   'mode.text': 'Văn bản (sửa được)',
+  'mode.layout': 'Bố cục gốc (neo tuyệt đối)',
   'mode.visual': 'Hình ảnh (giữ nguyên trang)',
 
   'scale.72': '72 dpi (nhẹ)',
@@ -75,7 +76,7 @@ const vi: Record<MessageKey, string> = {
 
   'footnote.title': 'Lưu ý:',
   'footnote.body':
-    'file được xử lý bằng JavaScript ngay trên máy bạn. Chế độ văn bản giữ nội dung, hình ảnh và định dạng cơ bản nhưng không tái tạo được bảng hay bố cục phức tạp — hãy dùng chế độ hình ảnh khi cần giống bản gốc 100%. Trang scan hoặc trang bìa (chỉ có một ảnh lớn) được giữ nguyên dưới dạng ảnh. OCR tải dữ liệu ngôn ngữ (~5–15 MB) từ CDN ở lần dùng đầu tiên.',
+    'file được xử lý bằng JavaScript ngay trên máy bạn. Chế độ bố cục gốc giữ từng dòng đúng vị trí như PDF, chế độ văn bản dựng lại đoạn gọn hơn, chế độ hình ảnh giữ trang giống hệt từng pixel. Trang chỉ có một ảnh lớn (bìa, bản scan) luôn được giữ nguyên dạng ảnh. OCR tải dữ liệu ngôn ngữ (~5–15 MB) từ CDN ở lần dùng đầu tiên.',
 
   'warning.blankPages':
     'Các trang không có lớp văn bản (PDF scan) đã bị bỏ trống: {pages}. Bật OCR để chuyển các trang này.',

@@ -22,6 +22,7 @@ const en = {
   'field.autoStart': 'Convert as soon as files are added',
 
   'mode.text': 'Text (editable)',
+  'mode.layout': 'Exact layout (anchored)',
   'mode.visual': 'Images (keep pages as-is)',
 
   'scale.72': '72 dpi (small)',
@@ -77,7 +78,7 @@ const en = {
 
   'footnote.title': 'Note:',
   'footnote.body':
-    'files are processed with JavaScript on your device. Text mode keeps the content, pictures and basic formatting but cannot rebuild tables or complex layouts — use image mode when you need a 100% match. Pages that are a single large picture (book covers, scans) are kept as an image. OCR downloads language data (~5–15 MB) from a CDN the first time.',
+    'files are processed with JavaScript on your device. Exact layout keeps every line where the PDF had it, text mode rebuilds cleaner paragraphs, image mode keeps the pages pixel-identical. Pages that are a single large picture (book covers, scans) are kept as an image. OCR downloads language data (~5–15 MB) from a CDN the first time.',
 
   'warning.blankPages':
     'Pages without a text layer (scanned PDF) were left blank: {pages}. Turn on OCR to convert them.',

@@ -5,6 +5,7 @@ import { buildTextDocument, packDocument } from '../src/core/docxBuild';
 import { layoutPage, type PageLayout } from '../src/core/textLayout';
 import { createTestPdf, PAGE_HEIGHT } from './helpers/createTestPdf';
 import { createImagePdf } from './helpers/createImagePdf';
+import { baselineOffset } from '../src/core/anchoredLayout';
 import { ConvertError, DEFAULT_OPTIONS } from '../src/core/types';
 
 const LONG_LINE =
@@ -108,6 +109,56 @@ describe('convertPdf (text mode)', () => {
     const xml = await documentXml(result.blob);
     expect(xml).toContain('Anh o phia tren');
     expect(xml).toContain('<w:drawing>');
+    expect(await mediaFiles(result.blob)).toHaveLength(1);
+  });
+
+  it('anchors every line where the PDF had it in layout mode', async () => {
+    const pdf = createTestPdf([
+      [
+        { text: 'Tieu de', x: 72, y: PAGE_HEIGHT - 80, size: 24, bold: true },
+        { text: LONG_LINE, x: 72, y: PAGE_HEIGHT - 140, size: 12 },
+      ],
+    ]);
+
+    const result = await convertPdf({
+      data: pdf.buffer as ArrayBuffer,
+      options: { ...DEFAULT_OPTIONS, mode: 'layout', ocr: 'off' },
+    });
+
+    const xml = await documentXml(result.blob);
+    const frames = [...xml.matchAll(/<w:framePr [^/]*w:x="(-?\d+)" w:y="(-?\d+)"/g)].map((match) => ({
+      x: Number(match[1]) / 20,
+      y: Number(match[2]) / 20,
+    }));
+
+    expect(frames).toHaveLength(2);
+    // Both lines start on the same left edge, at the baseline minus the ascent.
+    expect(frames[0].x).toBeCloseTo(72, 1);
+    expect(frames[0].y).toBeCloseTo(80 - baselineOffset(24), 1);
+    expect(frames[1].y).toBeCloseTo(140 - baselineOffset(12), 1);
+    expect(xml).toContain('Tieu de');
+    expect((xml.match(/<w:sectPr/g) ?? [])).toHaveLength(1);
+  });
+
+  it('anchors pictures instead of reflowing them in layout mode', async () => {
+    const pdf = createImagePdf([
+      {
+        imageWidth: 32,
+        imageHeight: 32,
+        topHalf: true,
+        lines: [{ text: 'Chu ben duoi anh', x: 72, y: 120, size: 14 }],
+      },
+    ]);
+
+    const result = await convertPdf({
+      data: pdf.buffer as ArrayBuffer,
+      options: { ...DEFAULT_OPTIONS, mode: 'layout', ocr: 'off' },
+    });
+
+    const xml = await documentXml(result.blob);
+    expect(xml).toContain('<wp:anchor');
+    expect(xml).toContain('behindDoc="1"');
+    expect(xml).toContain('<w:framePr');
     expect(await mediaFiles(result.blob)).toHaveLength(1);
   });
 });

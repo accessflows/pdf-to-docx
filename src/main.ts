@@ -50,7 +50,8 @@ function loadOptions(): ConvertOptions {
     const parsed = JSON.parse(raw) as Partial<ConvertOptions>;
     const locale = isLocale(parsed.locale) ? parsed.locale : DEFAULT_LOCALE;
     return {
-      mode: parsed.mode === 'visual' ? 'visual' : 'text',
+      mode:
+        parsed.mode === 'visual' || parsed.mode === 'layout' ? parsed.mode : 'text',
       imageScale:
         typeof parsed.imageScale === 'number' ? parsed.imageScale : DEFAULT_OPTIONS.imageScale,
       ocr: parsed.ocr === 'off' || parsed.ocr === 'force' ? parsed.ocr : 'auto',
@@ -110,6 +111,7 @@ const SHELL = `
       <span data-i18n="field.mode"></span>
       <select id="mode">
         <option value="text" data-i18n="mode.text"></option>
+        <option value="layout" data-i18n="mode.layout"></option>
         <option value="visual" data-i18n="mode.visual"></option>
       </select>
     </label>
@@ -737,7 +739,8 @@ localeSelect.addEventListener('change', () => {
 });
 
 modeSelect.addEventListener('change', () => {
-  options.mode = modeSelect.value === 'visual' ? 'visual' : 'text';
+  const value = modeSelect.value;
+  options.mode = value === 'visual' || value === 'layout' ? value : 'text';
   saveOptions();
   syncControls();
 });

@@ -1,10 +1,13 @@
 import { DEFAULT_LOCALE, type Locale } from '../i18n';
 
-export type ConvertMode = 'text' | 'visual';
+export type ConvertMode = 'text' | 'layout' | 'visual';
 export type OcrMode = 'off' | 'auto' | 'force';
 
 export interface ConvertOptions {
-  /** `text` rebuilds editable paragraphs, `visual` embeds one image per page. */
+  /**
+   * `text` rebuilds editable paragraphs, `layout` keeps every line where the PDF
+   * had it, `visual` embeds one image per page.
+   */
   mode: ConvertMode;
   /** Raster scale used by visual mode (1 = 72 dpi, 2 = 144 dpi, ...). */
   imageScale: number;

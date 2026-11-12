@@ -2,10 +2,14 @@ import { getDocument, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dis
 import { ensurePdfjs, pdfjsAssetOptions } from './pdfjs';
 import { extractPage } from './pdfExtract';
 import { emptyPageLayout, layoutPage, type PageLayout } from './textLayout';
+import { buildAnchoredLines } from './anchoredLayout';
 import {
+  buildLayoutDocument,
   buildTextDocument,
   buildVisualDocument,
   packDocument,
+  type LayoutBlock,
+  type LayoutPage,
   type PageBlockImage,
   type RenderedPage,
   type TextPage,
@@ -221,8 +225,86 @@ async function convertText(
   };
 }
 
-export async function convertPdf({ data, options, onProgress }: ConvertInput): Promise<ConvertResult> {
-  await ensurePdfjs();
+/** Keeps every line and picture where the PDF had it instead of reflowing text. */
+async function convertLayout(
+  pdf: PDFDocumentProxy,
+  options: ConvertOptions,
+  report: (progress: ConvertProgress) => void,
+): Promise<ConvertResult> {
+  const total = pdf.numPages;
+  const pages: LayoutPage[] = [];
+  const blankPages: number[] = [];
+  const picturePages: number[] = [];
+  const ocrPageNumbers: number[] = [];
+  const imageCache = new Map<string, EncodedImage | null>();
+
+  for (let index = 1; index <= total; index += 1) {
+    const page = await pdf.getPage(index);
+    const extracted = await extractPage(page);
+    const graphics = analyzePageGraphics(await page.getOperatorList(), page.view);
+    const hasTextLayer = extracted.charCount > 0 && !graphics.hiddenText;
+    const useOcr = options.ocr === 'force' || (options.ocr === 'auto' && !hasTextLayer);
+
+    if (options.ocr !== 'force' && isImageOnlyPage(graphics, hasTextLayer)) {
+      const [picture] = await collectPageImages(page, graphics.images, imageCache);
+      if (picture) {
+        pages.push({
+          width: extracted.width,
+          height: extracted.height,
+          lines: [],
+          images: [{ ...picture, x: 0, y: 0, width: extracted.width, height: extracted.height }],
+        });
+        picturePages.push(index);
+        page.cleanup();
+        report({ page: index, pages: total, phase: 'text' });
+        await yieldToEventLoop();
+        continue;
+      }
+    }
+
+    const images = await collectPageImages(page, graphics.images, imageCache);
+    const lines = hasTextLayer ? buildAnchoredLines(extracted.fragments) : [];
+    const blocks: LayoutBlock[] = [];
+
+    // OCR text has no coordinates of its own, so it goes into one anchored box.
+    if (!lines.length && useOcr) {
+      report({ page: index, pages: total, phase: 'ocr' });
+      const paragraphs = await ocrPage(page, options);
+      if (paragraphs.length) {
+        ocrPageNumbers.push(index);
+        blocks.push({
+          x: 56,
+          y: 56,
+          width: Math.max(72, extracted.width - 112),
+          lines: paragraphs,
+        });
+      }
+    }
+
+    if (!lines.length && !blocks.length && !images.length) blankPages.push(index);
+    pages.push({ width: extracted.width, height: extracted.height, lines, images, blocks });
+
+    page.cleanup();
+    report({ page: index, pages: total, phase: 'text' });
+    await yieldToEventLoop();
+  }
+
+  const warnings: ConvertWarning[] = [];
+  if (blankPages.length) warnings.push({ code: 'blank-pages', pages: blankPages });
+  if (picturePages.length) warnings.push({ code: 'picture-pages', pages: picturePages });
+  if (ocrPageNumbers.length) warnings.push({ code: 'ocr-pages', pages: ocrPageNumbers });
+
+  report({ page: total, pages: total, phase: 'write' });
+  const data = await packDocument(buildLayoutDocument(pages));
+  return {
+    blob: new Blob([data], { type: DOCX_MIME }),
+    pageCount: total,
+    ocrPages: ocrPageNumbers.length,
+    warnings,
+  };
+}
+
+export async function convertPdf({ data, options, onProgress }: ConvertInput): Promise<ConvertResult> {  await ensurePdfjs();
   const report = (progress: ConvertProgress) => onProgress?.(progress);
 
   const task = getDocument({ data: new Uint8Array(data), ...pdfjsAssetOptions() });
@@ -234,9 +316,9 @@ export async function convertPdf({ data, options, onProgress }: ConvertInput): P
   }
 
   try {
-    return options.mode === 'visual'
-      ? await convertVisual(pdf, options, report)
-      : await convertText(pdf, options, report);
+    if (options.mode === 'visual') return await convertVisual(pdf, options, report);
+    if (options.mode === 'layout') return await convertLayout(pdf, options, report);
+    return await convertText(pdf, options, report);
   } finally {
     await task.destroy();
   }
