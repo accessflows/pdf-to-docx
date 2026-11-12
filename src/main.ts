@@ -84,6 +84,10 @@ const LANGUAGE_OPTIONS = LOCALES.map(
 ).join('');
 
 const SHELL = `
+  <div class="topbar">
+    <select id="locale" class="lang-select">${LANGUAGE_OPTIONS}</select>
+  </div>
+
   <header class="hero">
     <span class="hero__badge" data-i18n="app.badge"></span>
     <h1>PDF → DOCX</h1>
@@ -102,10 +106,6 @@ const SHELL = `
   </section>
 
   <section class="card options">
-    <label class="field">
-      <span data-i18n="field.language"></span>
-      <select id="locale">${LANGUAGE_OPTIONS}</select>
-    </label>
     <label class="field">
       <span data-i18n="field.mode"></span>
       <select id="mode">
@@ -207,6 +207,9 @@ function applyLocale(): void {
   for (const element of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
     element.textContent = translator(element.dataset.i18n as MessageKey);
   }
+  // The language picker has no visible label, it only sits in the corner.
+  localeSelect.setAttribute('aria-label', translator('field.language'));
+  localeSelect.title = translator('field.language');
 }
 
 function syncControls(): void {

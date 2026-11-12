@@ -18,8 +18,8 @@ không cần backend, chạy được offline sau lần tải đầu.
   Trang scan/bìa bị phủ kín bởi một ảnh được giữ nguyên dạng ảnh thay vì OCR (chọn "Luôn chạy OCR" để ép).
 - **Nhận diện bố cục 2 cột** (có thể tắt).
 - Tải từng file `.docx` hoặc tải tất cả thành một file `.zip`.
-- **Giao diện 6 ngôn ngữ**: English (mặc định), Tiếng Việt, 中文, 日本語, 한국어, Русский — đổi ngay trên
-  giao diện, lưu vào `localStorage`, đổi cả `<html lang>` và tiêu đề tab. Sáng/tối theo hệ điều hành.
+- **Giao diện 6 ngôn ngữ**: English (mặc định), Tiếng Việt, 中文, 日本語, 한국어, Русский — ô chọn ở góc trên
+  bên phải, lưu vào `localStorage`, đổi cả `<html lang>` và tiêu đề tab. Sáng/tối theo hệ điều hành.
 
 ## Ngôn ngữ giao diện
 

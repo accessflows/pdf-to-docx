@@ -60,6 +60,32 @@ body {
   padding: 48px 20px 80px;
 }
 
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -22px 0 2px;
+}
+
+.lang-select {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.lang-select:hover,
+.lang-select:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+
 .hero {
   text-align: center;
   margin-bottom: 28px;
