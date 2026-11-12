@@ -1,0 +1,28 @@
+{
+  "name": "pdf-to-docx",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Convert PDF to DOCX entirely in the browser (client-side).",
+  "scripts": {
+    "assets": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "npm run assets",
+    "dev": "vite",
+    "prebuild": "npm run assets",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "fixtures": "node scripts/make-fixture.mjs"
+  },
+  "dependencies": {
+    "docx": "^9.15.3",
+    "jszip": "^3.10.2",
+    "pdfjs-dist": "^6.5.438",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^3.2.4"
+  }
+}
