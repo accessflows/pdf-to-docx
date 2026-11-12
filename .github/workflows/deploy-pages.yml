@@ -22,7 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # pdf.js 6 needs Promise.try, which Node 22 does not have yet.
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
