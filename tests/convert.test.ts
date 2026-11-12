@@ -5,7 +5,7 @@ import { buildTextDocument, packDocument } from '../src/core/docxBuild';
 import { layoutPage, type PageLayout } from '../src/core/textLayout';
 import { createTestPdf, PAGE_HEIGHT } from './helpers/createTestPdf';
 import { createImagePdf } from './helpers/createImagePdf';
-import { DEFAULT_OPTIONS } from '../src/core/types';
+import { ConvertError, DEFAULT_OPTIONS } from '../src/core/types';
 
 const LONG_LINE =
   'Day la mot dong van ban du dai de trinh phat hien biet day la mot doan van lien tuc trong tai lieu.';
@@ -60,16 +60,17 @@ describe('convertPdf (text mode)', () => {
       options: { ...DEFAULT_OPTIONS, mode: 'text', ocr: 'off' },
     });
 
-    expect(result.warnings.join(' ')).toContain('1 trang không có lớp văn bản');
+    expect(result.warnings).toEqual([{ code: 'blank-pages', pages: [1] }]);
   });
 
   it('rejects files that are not valid PDFs', async () => {
-    await expect(
-      convertPdf({
-        data: new TextEncoder().encode('not a pdf at all').buffer as ArrayBuffer,
-        options: { ...DEFAULT_OPTIONS, mode: 'text', ocr: 'off' },
-      }),
-    ).rejects.toThrow(/PDF/);
+    const attempt = convertPdf({
+      data: new TextEncoder().encode('not a pdf at all').buffer as ArrayBuffer,
+      options: { ...DEFAULT_OPTIONS, mode: 'text', ocr: 'off' },
+    });
+
+    await expect(attempt).rejects.toBeInstanceOf(ConvertError);
+    await expect(attempt).rejects.toMatchObject({ code: 'invalid-pdf' });
   });
 
   it('keeps a page that is one big picture instead of dropping it', async () => {
@@ -83,8 +84,7 @@ describe('convertPdf (text mode)', () => {
     const xml = await documentXml(result.blob);
     expect(xml).toContain('<w:drawing>');
     expect(await mediaFiles(result.blob)).toHaveLength(1);
-    expect(result.warnings.join(' ')).toContain('giữ nguyên dưới dạng ảnh');
-    expect(result.warnings.join(' ')).not.toContain('bị bỏ trống');
+    expect(result.warnings).toEqual([{ code: 'picture-pages', pages: [1] }]);
   });
 
   it('keeps pictures on pages that also have text', async () => {

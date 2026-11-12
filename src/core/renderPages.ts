@@ -1,5 +1,6 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { RenderedPage } from './docxBuild';
+import { ConvertError } from './types';
 
 export async function renderPageToCanvas(
   page: PDFPageProxy,
@@ -11,7 +12,7 @@ export async function renderPageToCanvas(
   canvas.height = Math.max(1, Math.round(viewport.height));
 
   const context = canvas.getContext('2d', { alpha: false });
-  if (!context) throw new Error('Trình duyệt không hỗ trợ canvas 2D.');
+  if (!context) throw new ConvertError('canvas');
 
   context.fillStyle = '#ffffff';
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -29,7 +30,7 @@ export async function renderPageToPng(page: PDFPageProxy, scale: number): Promis
   const canvas = await renderPageToCanvas(page, scale);
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
   releaseCanvas(canvas);
-  if (!blob) throw new Error('Không thể tạo ảnh từ trang PDF.');
+  if (!blob) throw new ConvertError('page-image');
 
   const base = page.getViewport({ scale: 1 });
   return {

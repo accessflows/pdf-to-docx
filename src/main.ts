@@ -2,12 +2,25 @@ import './styles.css';
 import JSZip from 'jszip';
 import { convertPdf, terminateOcrWorker } from './core/convert';
 import {
+  ConvertError,
   DEFAULT_OPTIONS,
+  OCR_LANGS,
   OPTIONS_STORAGE_KEY,
   replaceExtension,
   type ConvertOptions,
   type ConvertProgress,
+  type ConvertWarning,
 } from './core/types';
+import {
+  DEFAULT_LOCALE,
+  LOCALES,
+  OCR_LANGS_BY_LOCALE,
+  formatPages,
+  isLocale,
+  t,
+  type Locale,
+  type MessageKey,
+} from './i18n';
 
 type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -18,7 +31,7 @@ interface Job {
   progress: number;
   detail: string;
   error?: string;
-  warnings: string[];
+  warnings: ConvertWarning[];
   pageCount?: number;
   blob?: Blob;
   url?: string;
@@ -33,26 +46,30 @@ let batchJobs: Job[] = [];
 function loadOptions(): ConvertOptions {
   try {
     const raw = localStorage.getItem(OPTIONS_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_OPTIONS };
+    if (!raw) return { ...DEFAULT_OPTIONS, ocrLangs: OCR_LANGS_BY_LOCALE[DEFAULT_LOCALE] };
     const parsed = JSON.parse(raw) as Partial<ConvertOptions>;
+    const locale = isLocale(parsed.locale) ? parsed.locale : DEFAULT_LOCALE;
     return {
       mode: parsed.mode === 'visual' ? 'visual' : 'text',
       imageScale:
         typeof parsed.imageScale === 'number' ? parsed.imageScale : DEFAULT_OPTIONS.imageScale,
       ocr: parsed.ocr === 'off' || parsed.ocr === 'force' ? parsed.ocr : 'auto',
-      ocrLangs:
-        typeof parsed.ocrLangs === 'string' && parsed.ocrLangs
-          ? parsed.ocrLangs
-          : DEFAULT_OPTIONS.ocrLangs,
+      ocrLangs: OCR_LANGS.includes(parsed.ocrLangs ?? '')
+        ? (parsed.ocrLangs as string)
+        : OCR_LANGS_BY_LOCALE[locale],
       detectColumns: parsed.detectColumns !== false,
       autoStart: parsed.autoStart !== false,
+      locale,
     };
   } catch {
-    return { ...DEFAULT_OPTIONS };
+    return { ...DEFAULT_OPTIONS, ocrLangs: OCR_LANGS_BY_LOCALE[DEFAULT_LOCALE] };
   }
 }
 
 const options = loadOptions();
+
+const translator = (key: MessageKey, values?: Record<string, string | number>): string =>
+  t(options.locale, key, values);
 
 function saveOptions(): void {
   try {
@@ -62,11 +79,15 @@ function saveOptions(): void {
   }
 }
 
+const LANGUAGE_OPTIONS = LOCALES.map(
+  (locale) => `<option value="${locale.id}">${locale.label}</option>`,
+).join('');
+
 const SHELL = `
   <header class="hero">
-    <span class="hero__badge">100% trên máy bạn</span>
+    <span class="hero__badge" data-i18n="app.badge"></span>
     <h1>PDF → DOCX</h1>
-    <p>Chuyển nhiều file PDF sang Word cùng lúc, ngay trong trình duyệt. File không được tải lên server nào.</p>
+    <p data-i18n="app.tagline"></p>
   </header>
 
   <section class="card dropzone" id="dropzone">
@@ -75,60 +96,67 @@ const SHELL = `
       <path d="M12 16V4m0 0L8 8m4-4 4 4" />
       <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
     </svg>
-    <p class="dropzone__title">Kéo &amp; thả file PDF vào đây</p>
-    <p class="dropzone__hint">hoặc <button type="button" class="link" id="browse">chọn file</button> — chọn được nhiều file, kể cả cả thư mục</p>
+    <p class="dropzone__title" data-i18n="drop.title"></p>
+    <p class="dropzone__hint"><span data-i18n="drop.or"></span> <button type="button" class="link" id="browse" data-i18n="drop.browse"></button> <span data-i18n="drop.suffix"></span></p>
     <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
   </section>
 
   <section class="card options">
     <label class="field">
-      <span>Chế độ chuyển</span>
+      <span data-i18n="field.language"></span>
+      <select id="locale">${LANGUAGE_OPTIONS}</select>
+    </label>
+    <label class="field">
+      <span data-i18n="field.mode"></span>
       <select id="mode">
-        <option value="text">Văn bản (sửa được)</option>
-        <option value="visual">Hình ảnh (giữ nguyên trang)</option>
+        <option value="text" data-i18n="mode.text"></option>
+        <option value="visual" data-i18n="mode.visual"></option>
       </select>
     </label>
     <label class="field">
-      <span>Độ nét ảnh</span>
+      <span data-i18n="field.imageScale"></span>
       <select id="image-scale">
-        <option value="1">72 dpi (nhẹ)</option>
-        <option value="1.5">108 dpi</option>
-        <option value="2">144 dpi</option>
-        <option value="3">216 dpi (nét)</option>
+        <option value="1" data-i18n="scale.72"></option>
+        <option value="1.5" data-i18n="scale.108"></option>
+        <option value="2" data-i18n="scale.144"></option>
+        <option value="3" data-i18n="scale.216"></option>
       </select>
     </label>
     <label class="field">
-      <span>OCR cho PDF scan</span>
+      <span data-i18n="field.ocr"></span>
       <select id="ocr">
-        <option value="auto">Tự động khi trang không có chữ</option>
-        <option value="force">Luôn chạy OCR</option>
-        <option value="off">Tắt</option>
+        <option value="auto" data-i18n="ocr.auto"></option>
+        <option value="force" data-i18n="ocr.force"></option>
+        <option value="off" data-i18n="ocr.off"></option>
       </select>
     </label>
     <label class="field">
-      <span>Ngôn ngữ OCR</span>
+      <span data-i18n="field.ocrLangs"></span>
       <select id="ocr-langs">
-        <option value="vie+eng">Tiếng Việt + Anh</option>
-        <option value="vie">Chỉ tiếng Việt</option>
-        <option value="eng">Chỉ tiếng Anh</option>
+        <option value="vie+eng" data-i18n="ocrLang.vieEng"></option>
+        <option value="chi_sim+eng" data-i18n="ocrLang.chiEng"></option>
+        <option value="jpn+eng" data-i18n="ocrLang.jpnEng"></option>
+        <option value="kor+eng" data-i18n="ocrLang.korEng"></option>
+        <option value="rus+eng" data-i18n="ocrLang.rusEng"></option>
+        <option value="eng" data-i18n="ocrLang.eng"></option>
       </select>
     </label>
     <label class="field field--check">
       <input type="checkbox" id="detect-columns" />
-      <span>Nhận diện bố cục 2 cột</span>
+      <span data-i18n="field.columns"></span>
     </label>
     <label class="field field--check">
       <input type="checkbox" id="auto-start" />
-      <span>Tự động chuyển khi thêm file</span>
+      <span data-i18n="field.autoStart"></span>
     </label>
   </section>
 
   <div class="toolbar">
-    <div class="toolbar__info" id="summary" aria-live="polite">Chưa có file nào.</div>
+    <div class="toolbar__info" id="summary" aria-live="polite"></div>
     <div class="toolbar__actions">
-      <button type="button" class="btn btn--primary" id="convert">Chuyển đổi</button>
-      <button type="button" class="btn" id="download-all">Tải tất cả (.zip)</button>
-      <button type="button" class="btn btn--ghost" id="clear">Xóa danh sách</button>
+      <button type="button" class="btn btn--primary" id="convert" data-i18n="action.convert"></button>
+      <button type="button" class="btn" id="download-all" data-i18n="action.downloadAll"></button>
+      <button type="button" class="btn btn--ghost" id="clear" data-i18n="action.clear"></button>
     </div>
   </div>
 
@@ -136,22 +164,19 @@ const SHELL = `
     <div class="progress progress--thick">
       <div class="progress__bar" id="batch-bar"></div>
     </div>
-    <span class="batch__label" id="batch-label" aria-live="polite">Đang chuyển đổi…</span>
+    <span class="batch__label" id="batch-label" aria-live="polite"></span>
   </div>
 
   <ul class="list" id="list" aria-live="polite"></ul>
 
   <p class="footnote">
-    <strong>Lưu ý:</strong> file được xử lý bằng JavaScript ngay trên máy bạn. Chế độ văn bản giữ nội dung, hình
-    ảnh và định dạng cơ bản nhưng không tái tạo được bảng hay bố cục phức tạp — hãy dùng chế độ hình ảnh
-    khi cần giống bản gốc 100%. Trang scan hoặc trang bìa (chỉ có một ảnh lớn) được giữ nguyên dưới dạng ảnh.
-    OCR tải dữ liệu ngôn ngữ (~5–15 MB) từ CDN ở lần dùng đầu tiên.
+    <strong data-i18n="footnote.title"></strong> <span data-i18n="footnote.body"></span>
   </p>
   <div class="toast" id="toast" role="status"></div>
 `;
 
 const app = document.getElementById('app');
-if (!app) throw new Error('Không tìm thấy phần tử #app');
+if (!app) throw new Error('Missing #app element');
 app.innerHTML = SHELL;
 
 const dropzone = document.getElementById('dropzone') as HTMLElement;
@@ -164,6 +189,7 @@ const downloadAllButton = document.getElementById('download-all') as HTMLButtonE
 const clearButton = document.getElementById('clear') as HTMLButtonElement;
 const toastElement = document.getElementById('toast') as HTMLElement;
 
+const localeSelect = document.getElementById('locale') as HTMLSelectElement;
 const modeSelect = document.getElementById('mode') as HTMLSelectElement;
 const imageScaleSelect = document.getElementById('image-scale') as HTMLSelectElement;
 const ocrSelect = document.getElementById('ocr') as HTMLSelectElement;
@@ -174,7 +200,17 @@ const batchElement = document.getElementById('batch') as HTMLElement;
 const batchBar = document.getElementById('batch-bar') as HTMLElement;
 const batchLabel = document.getElementById('batch-label') as HTMLElement;
 
+/** Fills every `data-i18n` placeholder with the string for the current locale. */
+function applyLocale(): void {
+  document.documentElement.lang = options.locale;
+  document.title = translator('app.title');
+  for (const element of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+    element.textContent = translator(element.dataset.i18n as MessageKey);
+  }
+}
+
 function syncControls(): void {
+  localeSelect.value = options.locale;
   modeSelect.value = options.mode;
   imageScaleSelect.value = String(options.imageScale);
   ocrSelect.value = options.ocr;
@@ -204,22 +240,45 @@ function formatBytes(bytes: number): string {
 function statusLabel(job: Job): string {
   switch (job.status) {
     case 'queued':
-      return 'Chờ';
+      return translator('status.queued');
     case 'running':
-      return job.detail || 'Đang xử lý…';
+      return job.detail || translator('status.processing');
     case 'done':
-      return 'Xong';
+      return translator('status.done');
     default:
-      return 'Lỗi';
+      return translator('status.error');
   }
 }
 
 function describeProgress(progress: ConvertProgress): string {
-  const suffix = `${progress.page}/${progress.pages}`;
-  if (progress.phase === 'ocr') return `OCR trang ${suffix}`;
-  if (progress.phase === 'render') return `Dựng ảnh trang ${suffix}`;
-  if (progress.phase === 'write') return 'Đang ghi file DOCX…';
-  return `Đọc trang ${suffix}`;
+  const values = { page: progress.page, pages: progress.pages };
+  if (progress.phase === 'ocr') return translator('progress.ocr', values);
+  if (progress.phase === 'render') return translator('progress.render', values);
+  if (progress.phase === 'write') return translator('progress.write');
+  return translator('progress.reading', values);
+}
+
+function describeWarning(warning: ConvertWarning): string {
+  const values = { count: warning.pages.length, pages: warning.pages.join(', ') };
+  if (warning.code === 'blank-pages') return translator('warning.blankPages', values);
+  if (warning.code === 'picture-pages') return translator('warning.picturePages', values);
+  return translator('warning.ocr', values);
+}
+
+const ERROR_MESSAGES: Record<string, MessageKey> = {
+  password: 'error.password',
+  'invalid-pdf': 'error.invalidPdf',
+  'unreadable-pdf': 'error.unreadablePdf',
+  canvas: 'error.canvas',
+  'page-image': 'error.pageImage',
+};
+
+function describeError(error: unknown): string {
+  if (error instanceof ConvertError) {
+    const key = ERROR_MESSAGES[error.code];
+    if (key) return translator(key);
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createRow(job: Job): HTMLLIElement {
@@ -260,7 +319,9 @@ function createRow(job: Job): HTMLLIElement {
     const download = document.createElement('button');
     download.type = 'button';
     download.dataset.action = 'download';
-    download.textContent = `Tải .docx${job.pageCount ? ` (${job.pageCount} trang)` : ''}`;
+    download.textContent = job.pageCount
+      ? translator('action.downloadPages', { pages: formatPages(options.locale, job.pageCount) })
+      : translator('action.download');
     actions.append(download);
   }
 
@@ -268,7 +329,8 @@ function createRow(job: Job): HTMLLIElement {
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.dataset.action = 'retry';
-    retry.textContent = job.status === 'error' ? 'Thử lại' : 'Chuyển đổi';
+    retry.textContent =
+      job.status === 'error' ? translator('action.retry') : translator('action.convert');
     actions.append(retry);
   }
 
@@ -276,7 +338,7 @@ function createRow(job: Job): HTMLLIElement {
   remove.type = 'button';
   remove.dataset.action = 'remove';
   remove.className = 'is-danger';
-  remove.textContent = 'Xóa';
+  remove.textContent = translator('action.remove');
   actions.append(remove);
 
   row.append(head, progressTrack, actions);
@@ -300,7 +362,7 @@ function createRow(job: Job): HTMLLIElement {
     warnings.className = 'warnings';
     for (const warning of job.warnings) {
       const item = document.createElement('li');
-      item.textContent = warning;
+      item.textContent = describeWarning(warning);
       warnings.append(item);
     }
     row.append(warnings);
@@ -319,23 +381,26 @@ function render(): void {
   const waiting = queued + failed;
 
   if (!jobs.length) {
-    summaryElement.textContent = 'Chưa có file nào.';
+    summaryElement.textContent = translator('summary.empty');
   } else {
-    const parts = [`${jobs.length} file`, `${done} xong`];
-    if (active) parts.push(`${active} đang chạy`);
-    if (queued) parts.push(`${queued} chờ`);
-    if (failed) parts.push(`${failed} lỗi`);
+    const parts = [
+      translator('summary.files', { count: jobs.length }),
+      translator('summary.done', { count: done }),
+    ];
+    if (active) parts.push(translator('summary.running', { count: active }));
+    if (queued) parts.push(translator('summary.queued', { count: queued }));
+    if (failed) parts.push(translator('summary.failed', { count: failed }));
     summaryElement.textContent = parts.join(' · ');
   }
 
   convertButton.disabled = running || !jobs.length;
   convertButton.textContent = running
-    ? 'Đang chuyển đổi…'
+    ? translator('action.converting')
     : waiting
-      ? `Chuyển đổi (${waiting})`
+      ? translator('action.convertCount', { count: waiting })
       : jobs.length
-        ? 'Chuyển đổi lại'
-        : 'Chuyển đổi';
+        ? translator('action.convertAgain')
+        : translator('action.convert');
   downloadAllButton.disabled = done === 0;
   clearButton.disabled = !jobs.length || running;
 
@@ -349,9 +414,12 @@ function render(): void {
     const current = batchJobs.find((job) => job.status === 'running');
     batchElement.hidden = false;
     batchBar.style.width = `${Math.round(overall * 100)}%`;
-    batchLabel.textContent = `Đang chuyển đổi ${finished}/${batchJobs.length} file · ${Math.round(overall * 100)}%${
-      current ? ` · ${current.detail}` : ''
-    }`;
+    const label = translator('batch.converting', {
+      done: finished,
+      total: batchJobs.length,
+      percent: Math.round(overall * 100),
+    });
+    batchLabel.textContent = current ? `${label} · ${current.detail}` : label;
   } else {
     batchElement.hidden = true;
   }
@@ -374,7 +442,7 @@ function addFiles(files: File[]): void {
   );
 
   if (!pdfs.length) {
-    showToast('Không tìm thấy file PDF nào.');
+    showToast(translator('toast.noPdf'));
     return;
   }
 
@@ -385,7 +453,7 @@ function addFiles(files: File[]): void {
       file,
       status: 'queued',
       progress: 0,
-      detail: 'Chờ',
+      detail: translator('status.queued'),
       warnings: [],
     });
   }
@@ -401,7 +469,7 @@ function addFiles(files: File[]): void {
 async function runJob(job: Job): Promise<void> {
   job.status = 'running';
   job.progress = 0;
-  job.detail = 'Đang đọc PDF…';
+  job.detail = translator('status.readingPdf');
   job.error = undefined;
   job.warnings = [];
   job.pageCount = undefined;
@@ -428,13 +496,13 @@ async function runJob(job: Job): Promise<void> {
     job.warnings = result.warnings;
     job.status = 'done';
     job.progress = 1;
-    job.detail = `${result.pageCount} trang`;
+    job.detail = formatPages(options.locale, result.pageCount);
     if (result.ocrPages) hasOcrWork = true;
   } catch (error) {
     job.status = 'error';
     job.progress = 0;
-    job.detail = 'Lỗi';
-    job.error = error instanceof Error ? error.message : String(error);
+    job.detail = translator('status.error');
+    job.error = describeError(error);
   }
 
   scheduleRender();
@@ -455,7 +523,7 @@ async function startConversion(): Promise<void> {
     if (job.status === 'done') {
       job.status = 'queued';
       job.progress = 0;
-      job.detail = 'Chờ';
+      job.detail = translator('status.queued');
     }
   }
   render();
@@ -511,7 +579,7 @@ async function downloadAll(): Promise<void> {
   }
 
   downloadAllButton.disabled = true;
-  downloadAllButton.textContent = 'Đang nén…';
+  downloadAllButton.textContent = translator('action.zipping');
   try {
     const zip = new JSZip();
     const used = new Set<string>();
@@ -537,9 +605,9 @@ async function downloadAll(): Promise<void> {
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   } catch (error) {
-    showToast(error instanceof Error ? error.message : 'Không tạo được file ZIP.');
+    showToast(describeError(error) || translator('toast.zipFailed'));
   } finally {
-    downloadAllButton.textContent = 'Tải tất cả (.zip)';
+    downloadAllButton.textContent = translator('action.downloadAll');
     render();
   }
 }
@@ -637,7 +705,7 @@ listElement.addEventListener('click', (event) => {
   if (button.dataset.action === 'retry') {
     job.status = 'queued';
     job.progress = 0;
-    job.detail = 'Chờ';
+    job.detail = translator('status.queued');
     render();
     void startConversion();
   }
@@ -648,6 +716,20 @@ downloadAllButton.addEventListener('click', () => void downloadAll());
 clearButton.addEventListener('click', () => {
   for (const job of jobs) if (job.url) URL.revokeObjectURL(job.url);
   jobs.length = 0;
+  render();
+});
+
+localeSelect.addEventListener('change', () => {
+  const previous = options.locale;
+  const locale: Locale = isLocale(localeSelect.value) ? localeSelect.value : DEFAULT_LOCALE;
+  options.locale = locale;
+  // Follow the interface language with OCR until the user picks a set explicitly.
+  if (options.ocrLangs === OCR_LANGS_BY_LOCALE[previous]) {
+    options.ocrLangs = OCR_LANGS_BY_LOCALE[locale];
+  }
+  saveOptions();
+  applyLocale();
+  syncControls();
   render();
 });
 
@@ -689,5 +771,6 @@ window.addEventListener('beforeunload', (event) => {
   if (running) event.preventDefault();
 });
 
+applyLocale();
 syncControls();
 render();

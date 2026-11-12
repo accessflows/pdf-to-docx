@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, type Locale } from '../i18n';
+
 export type ConvertMode = 'text' | 'visual';
 export type OcrMode = 'off' | 'auto' | 'force';
 
@@ -13,6 +15,8 @@ export interface ConvertOptions {
   detectColumns: boolean;
   /** Start converting as soon as files are added. */
   autoStart: boolean;
+  /** Interface language. The conversion itself does not depend on it. */
+  locale: Locale;
 }
 
 export const DEFAULT_OPTIONS: ConvertOptions = {
@@ -22,7 +26,11 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
   ocrLangs: 'vie+eng',
   detectColumns: true,
   autoStart: true,
+  locale: DEFAULT_LOCALE,
 };
+
+/** OCR language combinations offered in the interface. */
+export const OCR_LANGS = ['vie+eng', 'chi_sim+eng', 'jpn+eng', 'kor+eng', 'rus+eng', 'eng'];
 
 export const OPTIONS_STORAGE_KEY = 'pdf2docx:options';
 
@@ -32,11 +40,34 @@ export interface ConvertProgress {
   phase: 'text' | 'render' | 'ocr' | 'write';
 }
 
+export type ConvertWarningCode = 'blank-pages' | 'picture-pages' | 'ocr-pages';
+
+/** Something worth telling the user about; the UI turns it into a sentence. */
+export interface ConvertWarning {
+  code: ConvertWarningCode;
+  pages: number[];
+}
+
+export type ConvertErrorCode =
+  | 'password'
+  | 'invalid-pdf'
+  | 'unreadable-pdf'
+  | 'canvas'
+  | 'page-image';
+
+/** Error carrying a stable code so the UI can show it in the selected language. */
+export class ConvertError extends Error {
+  constructor(readonly code: ConvertErrorCode) {
+    super(code);
+    this.name = 'ConvertError';
+  }
+}
+
 export interface ConvertResult {
   blob: Blob;
   pageCount: number;
   ocrPages: number;
-  warnings: string[];
+  warnings: ConvertWarning[];
 }
 
 export const DOCX_MIME =

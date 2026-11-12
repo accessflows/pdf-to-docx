@@ -14,7 +14,14 @@ import { releaseCanvas, renderPageToCanvas, renderPageToPng } from './renderPage
 import { recognizeParagraphs, terminateOcrWorker } from './ocr';
 import { analyzePageGraphics, isImageOnlyPage, resolveImageSource, type PageImage } from './pdfImages';
 import { encodeImageSource, type EncodedImage } from './imageEncode';
-import { DOCX_MIME, type ConvertOptions, type ConvertProgress, type ConvertResult } from './types';
+import {
+  ConvertError,
+  DOCX_MIME,
+  type ConvertOptions,
+  type ConvertProgress,
+  type ConvertResult,
+  type ConvertWarning,
+} from './types';
 
 export { terminateOcrWorker };
 
@@ -31,15 +38,9 @@ const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve
 
 function translatePdfError(error: unknown): Error {
   const name = (error as { name?: string } | null)?.name;
-  if (name === 'PasswordException') {
-    return new Error('PDF được bảo vệ bằng mật khẩu nên không thể chuyển đổi.');
-  }
-  if (name === 'InvalidPDFException') {
-    return new Error('File không phải PDF hợp lệ hoặc đã bị hỏng.');
-  }
-  if (name === 'MissingPDFException') {
-    return new Error('Không đọc được nội dung PDF.');
-  }
+  if (name === 'PasswordException') return new ConvertError('password');
+  if (name === 'InvalidPDFException') return new ConvertError('invalid-pdf');
+  if (name === 'MissingPDFException') return new ConvertError('unreadable-pdf');
   return error instanceof Error ? error : new Error(String(error));
 }
 
@@ -154,6 +155,7 @@ async function convertText(
   const pages: TextPage[] = [];
   const blankPages: number[] = [];
   const picturePages: number[] = [];
+  const ocrPageNumbers: number[] = [];
   // An image XObject can be painted on many pages; encode each one only once.
   const imageCache = new Map<string, EncodedImage | null>();
   let ocrPages = 0;
@@ -185,6 +187,7 @@ async function convertText(
 
     if (paragraphs.length) {
       ocrPages += 1;
+      ocrPageNumbers.push(index);
       // OCR already turned the page into text; the picture would only duplicate it.
       pages.push({ layout: ocrPageLayout(paragraphs, extracted.width, extracted.height) });
     } else if (hasTextLayer) {
@@ -203,22 +206,10 @@ async function convertText(
     await yieldToEventLoop();
   }
 
-  const warnings: string[] = [];
-  if (blankPages.length) {
-    warnings.push(
-      `${blankPages.length} trang không có lớp văn bản (PDF scan) và bị bỏ trống: ${blankPages.join(', ')}. Bật OCR để chuyển các trang này.`,
-    );
-  }
-  if (picturePages.length) {
-    warnings.push(
-      `${picturePages.length} trang là hình (bìa hoặc bản scan) nên được giữ nguyên dưới dạng ảnh: ${picturePages.join(', ')}.`,
-    );
-  }
-  if (ocrPages) {
-    warnings.push(
-      `${ocrPages} trang được nhận dạng bằng OCR — hãy đọc lại để sửa lỗi chính tả nếu có.`,
-    );
-  }
+  const warnings: ConvertWarning[] = [];
+  if (blankPages.length) warnings.push({ code: 'blank-pages', pages: blankPages });
+  if (picturePages.length) warnings.push({ code: 'picture-pages', pages: picturePages });
+  if (ocrPages) warnings.push({ code: 'ocr-pages', pages: ocrPageNumbers });
 
   report({ page: total, pages: total, phase: 'write' });
   const data = await packDocument(buildTextDocument(pages));
