@@ -87,6 +87,11 @@ const zh: Record<MessageKey, string> = {
   'error.unreadablePdf': '无法读取 PDF 的内容。',
   'error.canvas': '此浏览器不支持 canvas 2D。',
   'error.pageImage': '无法从 PDF 页面生成图片。',
+  'error.oldBrowser': '此浏览器版本过旧，无法转换。请更新 Chrome、Edge、Firefox 或 Safari。',
+  'action.cancel': '停止',
+  'status.cancelled': '已取消',
+  'warning.imageLimit': '图片超过 60 张的页面只保留了前 60 张：{pages}。',
+  'error.ocr': 'OCR 步骤失败，请检查网络后重试。',
 };
 
 export default zh;

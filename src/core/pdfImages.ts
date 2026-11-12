@@ -16,6 +16,10 @@ export interface PdfImageSource {
   data?: Uint8Array | Uint8ClampedArray;
   /** pdf.js sometimes hands over an already decoded bitmap instead of pixels. */
   bitmap?: ImageBitmap;
+  /** Stencil mask: 1bpp coverage painted with `color`. */
+  mask?: boolean;
+  /** Fill colour for a mask, 0..1 RGB. */
+  color?: [number, number, number];
 }
 
 /** An image painted on a page, positioned in points from the page's top-left corner. */
@@ -24,6 +28,10 @@ export interface PageImage {
   name: string | null;
   /** Pixels that come straight from the operator list (inline images). */
   inline?: PdfImageSource;
+  /** True for stencil masks: 1bpp coverage painted with `color`. */
+  mask?: boolean;
+  /** Fill colour of a mask, as 0..1 RGB. */
+  color?: [number, number, number];
   x: number;
   y: number;
   width: number;
@@ -36,6 +44,8 @@ export interface PageGraphics {
   hiddenText: boolean;
   /** Share of the page area covered by painted images, 0..1. */
   imageCoverage: number;
+  /** Fill colour of each text-showing operator, in content-stream order (0..1 RGB). */
+  textColors: [number, number, number][];
 }
 
 type Matrix = [number, number, number, number, number, number];
@@ -59,6 +69,40 @@ function multiply(m: Matrix, n: ArrayLike<number>): Matrix {
   ];
 }
 
+/** pdf.js hands the fill colour over as `#rrggbb`; older paths use 0..1 numbers. */
+function parseFillColor(args: unknown[] | undefined): [number, number, number] | null {
+  if (!args?.length) return null;
+  const [first, second, third] = args;
+
+  if (typeof first === 'string') {
+    const hex = first.replace('#', '');
+    if (/^[0-9a-f]{6}$/i.test(hex)) {
+      return [
+        parseInt(hex.slice(0, 2), 16) / 255,
+        parseInt(hex.slice(2, 4), 16) / 255,
+        parseInt(hex.slice(4, 6), 16) / 255,
+      ];
+    }
+    if (/^[0-9a-f]{3}$/i.test(hex)) {
+      return [
+        parseInt(hex[0] + hex[0], 16) / 255,
+        parseInt(hex[1] + hex[1], 16) / 255,
+        parseInt(hex[2] + hex[2], 16) / 255,
+      ];
+    }
+    return null;
+  }
+
+  if (second !== undefined && third !== undefined) {
+    return [Number(first), Number(second), Number(third)];
+  }
+  if (first !== undefined) {
+    const grey = Number(first);
+    return [grey, grey, grey];
+  }
+  return null;
+}
+
 /**
  * Collects the images a page paints, with the rectangle each one occupies.
  * Only the operator list is needed, so this runs without a canvas.
@@ -76,11 +120,13 @@ export function analyzePageGraphics(
   const images: PageImage[] = [];
   const seen = new Set<string>();
   const stack: Matrix[] = [];
+  const textColors: [number, number, number][] = [];
   let ctm: Matrix = IDENTITY;
   let textRenderingMode = 0;
   let visibleText = 0;
   let invisibleText = 0;
   let coveredArea = 0;
+  let fillColor: [number, number, number] = [0, 0, 0];
 
   const rectFor = (matrix: Matrix) => {
     const xs = [0, 0, 0, 0];
@@ -109,7 +155,12 @@ export function analyzePageGraphics(
     };
   };
 
-  const record = (name: string | null, matrix: Matrix, inline?: PdfImageSource) => {
+  const record = (
+    name: string | null,
+    matrix: Matrix,
+    inline?: PdfImageSource,
+    mask = false,
+  ) => {
     const rect = rectFor(matrix);
     if (rect.width * rect.height < MIN_IMAGE_AREA) return;
 
@@ -120,13 +171,13 @@ export function analyzePageGraphics(
     const visibleArea = Math.max(0, overlapWidth) * Math.max(0, overlapHeight);
     if (visibleArea < MIN_IMAGE_AREA) return;
 
-    const key = `${name ?? 'inline'}:${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(
-      rect.width,
-    )},${Math.round(rect.height)}`;
+    const key = `${mask ? 'mask' : (name ?? 'inline')}:${Math.round(rect.x)},${Math.round(
+      rect.y,
+    )},${Math.round(rect.width)},${Math.round(rect.height)}`;
     if (seen.has(key)) return;
     seen.add(key);
 
-    images.push({ name, inline, ...rect });
+    images.push({ name, inline, mask, color: mask ? fillColor : undefined, ...rect });
     coveredArea += visibleArea;
   };
 
@@ -165,6 +216,7 @@ export function analyzePageGraphics(
           invisibleText += 1;
         } else {
           visibleText += 1;
+          textColors.push(fillColor);
         }
         break;
       case OPS.paintImageXObject:
@@ -191,6 +243,17 @@ export function analyzePageGraphics(
       case OPS.paintInlineImageXObject:
         if (args?.[0]) record(null, ctm, args[0] as PdfImageSource);
         break;
+      case OPS.setFillRGBColor:
+      case OPS.setFillGray:
+      case OPS.setFillCMYKColor:
+      case OPS.setFillColor: {
+        const parsed = parseFillColor(Array.isArray(args) ? args : undefined);
+        if (parsed) fillColor = parsed;
+        break;
+      }
+      case OPS.paintImageMaskXObject:
+        if (args?.[0]) record(null, ctm, args[0] as PdfImageSource, true);
+        break;
       default:
         break;
     }
@@ -201,6 +264,7 @@ export function analyzePageGraphics(
     images,
     hiddenText: invisibleText > 0 && visibleText === 0,
     imageCoverage: Math.min(1, coveredArea / pageArea),
+    textColors,
   };
 }
 
@@ -209,6 +273,15 @@ export function analyzePageGraphics(
  * in after the operator list, so it may not be available synchronously.
  */
 export async function resolveImageSource(
+  page: PDFPageProxy,
+  image: PageImage,
+): Promise<PdfImageSource | null> {
+  const source = await readImageSource(page, image);
+  if (!source) return null;
+  return { ...source, mask: image.mask, color: image.color };
+}
+
+async function readImageSource(
   page: PDFPageProxy,
   image: PageImage,
 ): Promise<PdfImageSource | null> {

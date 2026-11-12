@@ -66,39 +66,59 @@ function looksItalic(hint: string): boolean {
   return /italic|oblique/i.test(hint);
 }
 
-export async function extractPage(page: PDFPageProxy): Promise<ExtractedPage> {
-  const view = page.view;
-  const originX = view[0];
-  const originY = view[1];
-  const width = view[2] - originX;
-  const height = view[3] - originY;
+export async function extractPage(
+  page: PDFPageProxy,
+  textColors: [number, number, number][] = [],
+): Promise<ExtractedPage> {
+  // The viewport applies the page's /Rotate and view box offset, so text lands in
+  // display space: a landscape scan marked /Rotate 90 keeps its real size and
+  // position instead of being laid out as if it were upright.
+  const viewport = page.getViewport({ scale: 1 });
+  const width = viewport.width;
+  const height = viewport.height;
 
   const content = await page.getTextContent();
   const styles = (content.styles ?? {}) as Record<string, { fontFamily?: string }>;
+  const items = content.items.filter(
+    (item): item is Extract<typeof item, { str: string }> => 'str' in item && !!item.str,
+  );
+  // The operator list gives one fill colour per text run, in the same order as the
+  // text items. Only trust it when both lists line up.
+  const colors = textColors.length === items.length ? textColors : [];
+  const singleColor =
+    textColors.length && textColors.every((color) => sameColor(color, textColors[0]))
+      ? textColors[0]
+      : undefined;
+
   const fragments: TextFragment[] = [];
   let charCount = 0;
 
-  for (const item of content.items) {
-    if (!('str' in item) || !item.str) continue;
-
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
     const transform = item.transform;
     const fontSize = Math.hypot(transform[2], transform[3]) || item.height || 10;
     const family = styles[item.fontName]?.fontFamily;
     const hint = `${item.fontName} ${family ?? ''}`;
+    const [x, y] = viewport.convertToViewportPoint(transform[4], transform[5]);
 
     fragments.push({
       str: item.str,
-      x: transform[4] - originX,
-      // PDF space has its origin bottom-left; convert to a top-down baseline.
-      y: height - (transform[5] - originY),
+      x,
+      // PDF space has its origin bottom-left; the viewport already flips and rotates it.
+      y,
       w: item.width,
       h: fontSize,
       bold: looksBold(hint),
       italic: looksItalic(hint),
       fontFamily: cleanFontFamily(family),
+      color: colors[index] ?? singleColor,
     });
     charCount += item.str.trim().length;
   }
 
   return { width, height, fragments, charCount };
+}
+
+function sameColor(a: [number, number, number], b: [number, number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < 0.02 && Math.abs(a[1] - b[1]) < 0.02 && Math.abs(a[2] - b[2]) < 0.02;
 }

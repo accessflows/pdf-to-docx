@@ -16,6 +16,8 @@ export interface TextFragment {
   bold: boolean;
   italic: boolean;
   fontFamily?: string;
+  /** Fill colour as 0..1 RGB, when the PDF told us. */
+  color?: [number, number, number];
 }
 
 export interface LineBox {

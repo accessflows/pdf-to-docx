@@ -89,6 +89,12 @@ const ru: Record<MessageKey, string> = {
   'error.unreadablePdf': 'Не удалось прочитать содержимое PDF.',
   'error.canvas': 'Этот браузер не поддерживает canvas 2D.',
   'error.pageImage': 'Не удалось создать изображение из страницы PDF.',
+  'error.oldBrowser':
+    'Этот браузер слишком старый для конвертации. Обновите Chrome, Edge, Firefox или Safari.',
+  'action.cancel': 'Остановить',
+  'status.cancelled': 'Отменено',
+  'warning.imageLimit': 'На страницах с более чем 60 картинками оставлены первые 60: {pages}.',
+  'error.ocr': 'Этап OCR завершился ошибкой. Проверьте соединение и повторите.',
 };
 
 export default ru;

@@ -91,6 +91,12 @@ const en = {
   'error.unreadablePdf': 'Could not read the PDF content.',
   'error.canvas': 'This browser does not support canvas 2D.',
   'error.pageImage': 'Could not create an image from the PDF page.',
+  'error.oldBrowser':
+    'This browser is too old for the converter. Please update Chrome, Edge, Firefox or Safari.',
+  'action.cancel': 'Stop',
+  'status.cancelled': 'Cancelled',
+  'warning.imageLimit': 'Pages with more than 60 pictures were cut down to 60: {pages}.',
+  'error.ocr': 'The OCR step failed. Check your connection and try again.',
 } as const;
 
 export type MessageKey = keyof typeof en;

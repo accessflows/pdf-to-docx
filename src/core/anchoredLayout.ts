@@ -13,6 +13,7 @@ export interface AnchoredRun {
   bold: boolean;
   italic: boolean;
   fontFamily?: string;
+  color?: [number, number, number];
 }
 
 /** A line segment that keeps its absolute position (points, from the page top-left). */
@@ -56,7 +57,13 @@ function mergeRuns(fragments: TextFragment[]): AnchoredRun[] {
 
   for (const fragment of fragments) {
     const last = runs[runs.length - 1];
-    if (last && last.bold === fragment.bold && last.italic === fragment.italic && last.fontFamily === fragment.fontFamily) {
+    if (
+      last &&
+      last.bold === fragment.bold &&
+      last.italic === fragment.italic &&
+      last.fontFamily === fragment.fontFamily &&
+      sameColor(last.color, fragment.color)
+    ) {
       last.str += fragment.str;
       continue;
     }
@@ -65,10 +72,19 @@ function mergeRuns(fragments: TextFragment[]): AnchoredRun[] {
       bold: fragment.bold,
       italic: fragment.italic,
       fontFamily: fragment.fontFamily,
+      color: fragment.color,
     });
   }
 
   return runs;
+}
+
+function sameColor(
+  a?: [number, number, number],
+  b?: [number, number, number],
+): boolean {
+  if (!a || !b) return a === b;
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
 
 /**

@@ -12,6 +12,8 @@ export interface PdfTextLine {
   y: number;
   size: number;
   bold?: boolean;
+  /** Fill colour, 0..1 RGB. */
+  color?: [number, number, number];
 }
 
 const PAGE_WIDTH = 595;
@@ -24,16 +26,18 @@ function escapeText(text: string): string {
 function contentStream(lines: PdfTextLine[]): string {
   const commands = lines.map((line) => {
     const font = line.bold ? '/F2' : '/F1';
-    return `BT ${font} ${line.size} Tf ${line.x} ${line.y} Td (${escapeText(line.text)}) Tj ET`;
+    const color = line.color ? `${line.color.join(' ')} rg\n` : '';
+    return `${color}BT ${font} ${line.size} Tf ${line.x} ${line.y} Td (${escapeText(line.text)}) Tj ET`;
   });
   return commands.join('\n');
 }
 
-export function createTestPdf(pages: PdfTextLine[][]): Uint8Array {
+export function createTestPdf(pages: PdfTextLine[][], options: { rotate?: number } = {}): Uint8Array {
   const objects: string[] = [];
 
   const pageIds = pages.map((_, index) => 5 + index * 2);
   const kids = pageIds.map((id) => `${id} 0 R`).join(' ');
+  const rotation = options.rotate ? ` /Rotate ${options.rotate}` : '';
 
   objects.push('<< /Type /Catalog /Pages 2 0 R >>');
   objects.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
@@ -46,7 +50,7 @@ export function createTestPdf(pages: PdfTextLine[][]): Uint8Array {
     const contentId = 6 + index * 2;
     const stream = contentStream(lines);
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}]${rotation} ` +
         `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>`,
     );
     objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);

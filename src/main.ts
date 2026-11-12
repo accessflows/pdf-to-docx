@@ -1,6 +1,5 @@
 import './styles.css';
 import JSZip from 'jszip';
-import { convertPdf, terminateOcrWorker } from './core/convert';
 import {
   ConvertError,
   DEFAULT_OPTIONS,
@@ -42,6 +41,15 @@ let jobSeq = 0;
 let running = false;
 let hasOcrWork = false;
 let batchJobs: Job[] = [];
+let abortController: AbortController | null = null;
+
+/** The converter (pdf.js and friends) is a big module: load it when it is needed. */
+type ConverterModule = typeof import('./core/convert');
+let converterPromise: Promise<ConverterModule> | undefined;
+function loadConverter(): Promise<ConverterModule> {
+  converterPromise ??= import('./core/convert');
+  return converterPromise;
+}
 
 function loadOptions(): ConvertOptions {
   try {
@@ -95,14 +103,16 @@ const SHELL = `
     <p data-i18n="app.tagline"></p>
   </header>
 
-  <section class="card dropzone" id="dropzone">
+  <p class="notice" id="notice" role="alert" hidden></p>
+
+  <section class="card dropzone" id="dropzone" role="button" tabindex="0">
     <svg class="dropzone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M12 16V4m0 0L8 8m4-4 4 4" />
       <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
     </svg>
     <p class="dropzone__title" data-i18n="drop.title"></p>
-    <p class="dropzone__hint"><span data-i18n="drop.or"></span> <button type="button" class="link" id="browse" data-i18n="drop.browse"></button> <span data-i18n="drop.suffix"></span></p>
+    <p class="dropzone__hint"><span data-i18n="drop.or"></span> <span class="link" id="browse" data-i18n="drop.browse"></span> <span data-i18n="drop.suffix"></span></p>
     <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
   </section>
 
@@ -157,6 +167,7 @@ const SHELL = `
     <div class="toolbar__info" id="summary" aria-live="polite"></div>
     <div class="toolbar__actions">
       <button type="button" class="btn btn--primary" id="convert" data-i18n="action.convert"></button>
+      <button type="button" class="btn" id="cancel" data-i18n="action.cancel" hidden></button>
       <button type="button" class="btn" id="download-all" data-i18n="action.downloadAll"></button>
       <button type="button" class="btn btn--ghost" id="clear" data-i18n="action.clear"></button>
     </div>
@@ -183,10 +194,11 @@ app.innerHTML = SHELL;
 
 const dropzone = document.getElementById('dropzone') as HTMLElement;
 const fileInput = document.getElementById('file-input') as HTMLInputElement;
-const browseButton = document.getElementById('browse') as HTMLButtonElement;
+const browseButton = document.getElementById('browse') as HTMLElement;
 const listElement = document.getElementById('list') as HTMLUListElement;
 const summaryElement = document.getElementById('summary') as HTMLElement;
 const convertButton = document.getElementById('convert') as HTMLButtonElement;
+const cancelButton = document.getElementById('cancel') as HTMLButtonElement;
 const downloadAllButton = document.getElementById('download-all') as HTMLButtonElement;
 const clearButton = document.getElementById('clear') as HTMLButtonElement;
 const toastElement = document.getElementById('toast') as HTMLElement;
@@ -201,6 +213,16 @@ const autoStartInput = document.getElementById('auto-start') as HTMLInputElement
 const batchElement = document.getElementById('batch') as HTMLElement;
 const batchBar = document.getElementById('batch-bar') as HTMLElement;
 const batchLabel = document.getElementById('batch-label') as HTMLElement;
+const noticeElement = document.getElementById('notice') as HTMLElement;
+
+/** Features the converter relies on; anything older than these cannot convert. */
+function isBrowserSupported(): boolean {
+  return (
+    typeof CompressionStream === 'function' &&
+    typeof Blob.prototype.stream === 'function' &&
+    typeof URL.createObjectURL === 'function'
+  );
+}
 
 /** Fills every `data-i18n` placeholder with the string for the current locale. */
 function applyLocale(): void {
@@ -212,6 +234,11 @@ function applyLocale(): void {
   // The language picker has no visible label, it only sits in the corner.
   localeSelect.setAttribute('aria-label', translator('field.language'));
   localeSelect.title = translator('field.language');
+
+  if (!isBrowserSupported()) {
+    noticeElement.hidden = false;
+    noticeElement.textContent = translator('error.oldBrowser');
+  }
 }
 
 function syncControls(): void {
@@ -267,6 +294,7 @@ function describeWarning(warning: ConvertWarning): string {
   const values = { count: warning.pages.length, pages: warning.pages.join(', ') };
   if (warning.code === 'blank-pages') return translator('warning.blankPages', values);
   if (warning.code === 'picture-pages') return translator('warning.picturePages', values);
+  if (warning.code === 'image-limit') return translator('warning.imageLimit', values);
   return translator('warning.ocr', values);
 }
 
@@ -276,6 +304,7 @@ const ERROR_MESSAGES: Record<string, MessageKey> = {
   'unreadable-pdf': 'error.unreadablePdf',
   canvas: 'error.canvas',
   'page-image': 'error.pageImage',
+  'ocr-failed': 'error.ocr',
 };
 
 function describeError(error: unknown): string {
@@ -408,6 +437,8 @@ function render(): void {
         : translator('action.convert');
   downloadAllButton.disabled = done === 0;
   clearButton.disabled = !jobs.length || running;
+  cancelButton.hidden = !running;
+  convertButton.hidden = running;
 
   if (running && batchJobs.length) {
     const finished = batchJobs.filter((job) => job.status === 'done' || job.status === 'error').length;
@@ -485,9 +516,11 @@ async function runJob(job: Job): Promise<void> {
 
   try {
     const data = await job.file.arrayBuffer();
+    const { convertPdf } = await loadConverter();
     const result = await convertPdf({
       data,
       options: { ...options },
+      signal: abortController?.signal,
       onProgress: (progress) => {
         job.progress = progress.pages ? progress.page / progress.pages : 0;
         job.detail = describeProgress(progress);
@@ -504,10 +537,16 @@ async function runJob(job: Job): Promise<void> {
     job.detail = formatPages(options.locale, result.pageCount);
     if (result.ocrPages) hasOcrWork = true;
   } catch (error) {
-    job.status = 'error';
-    job.progress = 0;
-    job.detail = translator('status.error');
-    job.error = describeError(error);
+    if (error instanceof ConvertError && error.code === 'cancelled') {
+      job.status = 'queued';
+      job.progress = 0;
+      job.detail = translator('status.cancelled');
+    } else {
+      job.status = 'error';
+      job.progress = 0;
+      job.detail = translator('status.error');
+      job.error = describeError(error);
+    }
   }
 
   scheduleRender();
@@ -523,6 +562,7 @@ async function startConversion(): Promise<void> {
   if (!targets.length) return;
 
   running = true;
+  abortController = new AbortController();
   batchJobs = targets;
   for (const job of targets) {
     if (job.status === 'done') {
@@ -538,7 +578,7 @@ async function startConversion(): Promise<void> {
   let cursor = 0;
 
   const worker = async () => {
-    while (cursor < targets.length) {
+    while (cursor < targets.length && !abortController?.signal.aborted) {
       const job = targets[cursor];
       cursor += 1;
       if (!job) return;
@@ -550,13 +590,19 @@ async function startConversion(): Promise<void> {
     await Promise.all(Array.from({ length: concurrency }, worker));
   } finally {
     running = false;
+    abortController = null;
     batchJobs = [];
     if (hasOcrWork) {
       hasOcrWork = false;
+      const { terminateOcrWorker } = await loadConverter();
       await terminateOcrWorker();
     }
     render();
   }
+}
+
+function cancelConversion(): void {
+  abortController?.abort();
 }
 
 function downloadJob(job: Job): void {
@@ -670,7 +716,13 @@ async function collectDroppedFiles(transfer: DataTransfer): Promise<File[]> {
 }
 
 dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  fileInput.click();
+});
 browseButton.addEventListener('click', (event) => {
+  // The whole dropzone already opens the picker; this is just the visual affordance.
   event.stopPropagation();
   fileInput.click();
 });
@@ -717,6 +769,7 @@ listElement.addEventListener('click', (event) => {
 });
 
 convertButton.addEventListener('click', () => void startConversion());
+cancelButton.addEventListener('click', () => cancelConversion());
 downloadAllButton.addEventListener('click', () => void downloadAll());
 clearButton.addEventListener('click', () => {
   for (const job of jobs) if (job.url) URL.revokeObjectURL(job.url);
@@ -776,6 +829,16 @@ autoStartInput.addEventListener('change', () => {
 window.addEventListener('beforeunload', (event) => {
   if (running) event.preventDefault();
 });
+
+// The app shell + assets are precached at build time, so it keeps working offline.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const serviceWorker = new URL(`${import.meta.env.BASE_URL}sw.js`, window.location.href);
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register(serviceWorker).catch(() => {
+      // Offline support is a bonus; conversion works without it.
+    });
+  });
+}
 
 applyLocale();
 syncControls();

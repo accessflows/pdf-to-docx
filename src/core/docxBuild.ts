@@ -110,26 +110,54 @@ interface RunChunk {
   bold: boolean;
   italic: boolean;
   font?: string;
+  color?: [number, number, number];
+}
+
+/** 0..1 RGB -> the `RRGGBB` string Word expects. */
+function hexColor(color: [number, number, number]): string {
+  return color
+    .map((value) => Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+function runColor(color?: [number, number, number]): string | undefined {
+  if (!color) return undefined;
+  const hex = hexColor(color);
+  return hex === '000000' ? undefined : hex;
 }
 
 export function buildRuns(paragraph: ParagraphBox): TextRun[] {
   const size = Math.max(2, Math.round(paragraph.fontSize * 2));
-  const makeRun = (text: string, bold: boolean, italic: boolean, font?: string) =>
-    new TextRun({ text, bold, italics: italic, font, size });
+  const makeRun = (chunk: RunChunk) =>
+    new TextRun({
+      text: chunk.text,
+      bold: chunk.bold,
+      italics: chunk.italic,
+      font: chunk.font,
+      size,
+      color: runColor(chunk.color),
+    });
 
   if (!paragraph.lines.length) {
-    return [makeRun(paragraph.text, paragraph.bold, paragraph.italic)];
+    return [makeRun({ text: paragraph.text, bold: paragraph.bold, italic: paragraph.italic })];
   }
 
   const chunks: RunChunk[] = [];
-  const append = (text: string, bold: boolean, italic: boolean, font?: string) => {
+  const append = (text: string, chunk: Omit<RunChunk, 'text'>) => {
     if (!text) return;
     const last = chunks[chunks.length - 1];
-    if (last && last.bold === bold && last.italic === italic && last.font === font) {
+    if (
+      last &&
+      last.bold === chunk.bold &&
+      last.italic === chunk.italic &&
+      last.font === chunk.font &&
+      last.color === chunk.color
+    ) {
       last.text += text;
       return;
     }
-    chunks.push({ text, bold, italic, font });
+    chunks.push({ text, ...chunk });
   };
 
   for (let index = 0; index < paragraph.lines.length; index += 1) {
@@ -137,14 +165,20 @@ export function buildRuns(paragraph: ParagraphBox): TextRun[] {
 
     for (let position = 0; position < fragments.length; position += 1) {
       const fragment = fragments[position];
+      const style = {
+        bold: fragment.bold,
+        italic: fragment.italic,
+        font: fragment.fontFamily,
+        color: fragment.color,
+      };
       if (position > 0) {
         const previous = fragments[position - 1];
         const shouldSpace =
           needsSpace(previous.x + advanceWidth(previous), previous.h, fragment) &&
           !/^\s/.test(fragment.str);
-        if (shouldSpace) append(' ', fragment.bold, fragment.italic, fragment.fontFamily);
+        if (shouldSpace) append(' ', style);
       }
-      append(fragment.str, fragment.bold, fragment.italic, fragment.fontFamily);
+      append(fragment.str, style);
     }
 
     const nextLine = paragraph.lines[index + 1];
@@ -155,11 +189,16 @@ export function buildRuns(paragraph: ParagraphBox): TextRun[] {
     if (tail && /\p{L}-$/u.test(tail.text) && /^\p{Ll}/u.test(nextFirst.str)) {
       tail.text = tail.text.slice(0, -1);
     } else {
-      append(' ', nextFirst.bold, nextFirst.italic, nextFirst.fontFamily);
+      append(' ', {
+        bold: nextFirst.bold,
+        italic: nextFirst.italic,
+        font: nextFirst.fontFamily,
+        color: nextFirst.color,
+      });
     }
   }
 
-  return chunks.map((chunk) => makeRun(chunk.text, chunk.bold, chunk.italic, chunk.font));
+  return chunks.map(makeRun);
 }
 
 interface PageBlock {
@@ -336,6 +375,7 @@ function anchoredLineParagraph(line: AnchoredLine, pageWidth: number): Paragraph
           italics: run.italic,
           font: run.fontFamily,
           size,
+          color: runColor(run.color),
         }),
     ),
   });

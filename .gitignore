@@ -4,3 +4,6 @@ public/pdfjs/
 *.local
 .DS_Store
 .tmp/
+test-results/
+playwright-report/
+

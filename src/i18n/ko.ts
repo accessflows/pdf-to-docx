@@ -89,6 +89,11 @@ const ko: Record<MessageKey, string> = {
   'error.unreadablePdf': 'PDF 내용을 읽을 수 없습니다.',
   'error.canvas': '이 브라우저는 canvas 2D를 지원하지 않습니다.',
   'error.pageImage': 'PDF 페이지에서 이미지를 만들 수 없습니다.',
+  'error.oldBrowser': '이 브라우저는 너무 오래되어 변환할 수 없습니다. Chrome, Edge, Firefox, Safari를 업데이트하세요.',
+  'action.cancel': '중지',
+  'status.cancelled': '취소됨',
+  'warning.imageLimit': '이미지가 60개를 넘는 페이지는 처음 60개만 유지했습니다: {pages}.',
+  'error.ocr': 'OCR 단계가 실패했습니다. 연결을 확인한 뒤 다시 시도하세요.',
 };
 
 export default ko;

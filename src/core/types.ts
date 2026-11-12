@@ -43,7 +43,11 @@ export interface ConvertProgress {
   phase: 'text' | 'render' | 'ocr' | 'write';
 }
 
-export type ConvertWarningCode = 'blank-pages' | 'picture-pages' | 'ocr-pages';
+export type ConvertWarningCode =
+  | 'blank-pages'
+  | 'picture-pages'
+  | 'ocr-pages'
+  | 'image-limit';
 
 /** Something worth telling the user about; the UI turns it into a sentence. */
 export interface ConvertWarning {
@@ -56,12 +60,14 @@ export type ConvertErrorCode =
   | 'invalid-pdf'
   | 'unreadable-pdf'
   | 'canvas'
-  | 'page-image';
+  | 'page-image'
+  | 'ocr-failed'
+  | 'cancelled';
 
 /** Error carrying a stable code so the UI can show it in the selected language. */
 export class ConvertError extends Error {
-  constructor(readonly code: ConvertErrorCode) {
-    super(code);
+  constructor(readonly code: ConvertErrorCode, options?: { cause?: unknown }) {
+    super(code, options);
     this.name = 'ConvertError';
   }
 }

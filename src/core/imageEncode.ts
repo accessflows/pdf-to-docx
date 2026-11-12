@@ -27,6 +27,28 @@ export function toRgba(source: PdfImageSource): RgbaImage | null {
   if (!width || !height || !data) return null;
 
   const pixels = width * height;
+
+  if (source.mask) {
+    // PDF stencil masks paint where the bit is 0 and stay transparent where it is 1.
+    const [red, green, blue] = (source.color ?? [0, 0, 0]).map((value) =>
+      Math.round(Math.max(0, Math.min(1, value)) * 255),
+    );
+    const rgba = new Uint8ClampedArray(pixels * 4);
+    const rowBytes = (width + 7) >> 3;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const byte = data[y * rowBytes + (x >> 3)] ?? 0xff;
+        const painted = ((byte >> (7 - (x & 7))) & 1) === 0;
+        const to = (y * width + x) * 4;
+        rgba[to] = red;
+        rgba[to + 1] = green;
+        rgba[to + 2] = blue;
+        rgba[to + 3] = painted ? 255 : 0;
+      }
+    }
+    return { data: rgba, width, height };
+  }
+
   const resolvedKind =
     kind ?? (data.length >= pixels * 4 ? RGBA_32BPP : RGB_24BPP);
 

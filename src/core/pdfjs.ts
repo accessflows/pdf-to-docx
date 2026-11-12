@@ -1,4 +1,10 @@
-import * as pdfjs from 'pdfjs-dist';
+/**
+ * pdf.js entry point. The legacy build is deliberate: the modern build needs
+ * engine features a large share of browsers still lack (`Uint8Array#toHex` only
+ * landed in Chrome 140, `Promise.try` in Chrome 128), while the legacy build
+ * bundles the polyfills. It costs ~13% more bytes.
+ */
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 let ready: Promise<void> | undefined;
 
@@ -11,7 +17,7 @@ export function ensurePdfjs(): Promise<void> {
     ready = (async () => {
       if (typeof window === 'undefined') return;
       if (pdfjs.GlobalWorkerOptions.workerSrc) return;
-      const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+      const worker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
       pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
     })().catch(() => {
       // Fall back to pdf.js' main-thread worker; conversion still works, just slower.

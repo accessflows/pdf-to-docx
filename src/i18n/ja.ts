@@ -89,6 +89,12 @@ const ja: Record<MessageKey, string> = {
   'error.unreadablePdf': 'PDF の内容を読み込めませんでした。',
   'error.canvas': 'このブラウザは canvas 2D に対応していません。',
   'error.pageImage': 'PDF ページから画像を作成できませんでした。',
+  'error.oldBrowser':
+    'このブラウザは古いため変換できません。Chrome、Edge、Firefox、Safari を更新してください。',
+  'action.cancel': '停止',
+  'status.cancelled': '中止しました',
+  'warning.imageLimit': '画像が 60 枚を超えるページは最初の 60 枚のみ保持しました: {pages}。',
+  'error.ocr': 'OCR 処理に失敗しました。接続を確認して再試行してください。',
 };
 
 export default ja;

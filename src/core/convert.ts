@@ -1,5 +1,5 @@
-import { getDocument, type PDFDocumentProxy, type PDFPageProxy } from 'pdfjs-dist';
-import { ensurePdfjs, pdfjsAssetOptions } from './pdfjs';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import { ensurePdfjs, pdfjs, pdfjsAssetOptions } from './pdfjs';
 import { extractPage } from './pdfExtract';
 import { emptyPageLayout, layoutPage, type PageLayout } from './textLayout';
 import { buildAnchoredLines } from './anchoredLayout';
@@ -36,6 +36,8 @@ export interface ConvertInput {
   data: ArrayBuffer;
   options: ConvertOptions;
   onProgress?: (progress: ConvertProgress) => void;
+  /** Stops the conversion between pages when the user cancels. */
+  signal?: AbortSignal;
 }
 
 const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -75,11 +77,13 @@ async function convertVisual(
   pdf: PDFDocumentProxy,
   options: ConvertOptions,
   report: (progress: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<ConvertResult> {
   const total = pdf.numPages;
   const pages: RenderedPage[] = [];
 
   for (let index = 1; index <= total; index += 1) {
+    throwIfAborted(signal);
     const page = await pdf.getPage(index);
     pages.push(await renderPageToPng(page, options.imageScale));
     page.cleanup();
@@ -102,8 +106,10 @@ async function collectPageImages(
   page: PDFPageProxy,
   images: PageImage[],
   cache: Map<string, EncodedImage | null>,
+  onOverflow?: () => void,
 ): Promise<PageBlockImage[]> {
   const placed: PageBlockImage[] = [];
+  if (images.length > MAX_IMAGES_PER_PAGE) onOverflow?.();
 
   for (const image of images.slice(0, MAX_IMAGES_PER_PAGE)) {
     const key = image.name ?? `inline:${Math.round(image.x)},${Math.round(image.y)}`;
@@ -145,37 +151,48 @@ async function ocrPage(page: PDFPageProxy, options: ConvertOptions): Promise<str
   const canvas = await renderPageToCanvas(page, Math.min(3, Math.max(1.5, options.imageScale)));
   try {
     return await recognizeParagraphs(canvas, options.ocrLangs);
+  } catch (error) {
+    // Tesseract errors are English internals; the UI shows a localized message.
+    throw new ConvertError('ocr-failed', { cause: error });
   } finally {
     releaseCanvas(canvas);
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new ConvertError('cancelled');
 }
 
 async function convertText(
   pdf: PDFDocumentProxy,
   options: ConvertOptions,
   report: (progress: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<ConvertResult> {
   const total = pdf.numPages;
   const pages: TextPage[] = [];
   const blankPages: number[] = [];
   const picturePages: number[] = [];
   const ocrPageNumbers: number[] = [];
+  const limitedPages: number[] = [];
   // An image XObject can be painted on many pages; encode each one only once.
   const imageCache = new Map<string, EncodedImage | null>();
   let ocrPages = 0;
 
   for (let index = 1; index <= total; index += 1) {
+    throwIfAborted(signal);
     const page = await pdf.getPage(index);
-    const extracted = await extractPage(page);
     const graphics = analyzePageGraphics(await page.getOperatorList(), page.view);
+    const extracted = await extractPage(page, graphics.textColors);
     // A page without glyphs, or whose glyphs are all invisible, has no usable text layer.
     const hasTextLayer = extracted.charCount > 0 && !graphics.hiddenText;
     const useOcr = options.ocr === 'force' || (options.ocr === 'auto' && !hasTextLayer);
+    const noteLimit = () => limitedPages.push(index);
 
     // Scans and covers are one big picture: keep them as a picture instead of
     // dropping the artwork for a handful of (often invisible) characters.
     if (options.ocr !== 'force' && isImageOnlyPage(graphics, hasTextLayer)) {
-      const [picture] = await collectPageImages(page, graphics.images, imageCache);
+      const [picture] = await collectPageImages(page, graphics.images, imageCache, noteLimit);
       if (picture) {
         pages.push(picturePage(extracted.width, extracted.height, picture));
         picturePages.push(index);
@@ -198,7 +215,7 @@ async function convertText(
       const layout = layoutPage(extracted.fragments, extracted.width, extracted.height, {
         detectColumns: options.detectColumns,
       });
-      const images = await collectPageImages(page, graphics.images, imageCache);
+      const images = await collectPageImages(page, graphics.images, imageCache, noteLimit);
       pages.push({ layout, images });
     } else {
       blankPages.push(index);
@@ -210,10 +227,12 @@ async function convertText(
     await yieldToEventLoop();
   }
 
+  throwIfAborted(signal);
   const warnings: ConvertWarning[] = [];
   if (blankPages.length) warnings.push({ code: 'blank-pages', pages: blankPages });
   if (picturePages.length) warnings.push({ code: 'picture-pages', pages: picturePages });
   if (ocrPages) warnings.push({ code: 'ocr-pages', pages: ocrPageNumbers });
+  if (limitedPages.length) warnings.push({ code: 'image-limit', pages: limitedPages });
 
   report({ page: total, pages: total, phase: 'write' });
   const data = await packDocument(buildTextDocument(pages));
@@ -230,23 +249,27 @@ async function convertLayout(
   pdf: PDFDocumentProxy,
   options: ConvertOptions,
   report: (progress: ConvertProgress) => void,
+  signal?: AbortSignal,
 ): Promise<ConvertResult> {
   const total = pdf.numPages;
   const pages: LayoutPage[] = [];
   const blankPages: number[] = [];
   const picturePages: number[] = [];
   const ocrPageNumbers: number[] = [];
+  const limitedPages: number[] = [];
   const imageCache = new Map<string, EncodedImage | null>();
 
   for (let index = 1; index <= total; index += 1) {
+    throwIfAborted(signal);
     const page = await pdf.getPage(index);
-    const extracted = await extractPage(page);
     const graphics = analyzePageGraphics(await page.getOperatorList(), page.view);
+    const extracted = await extractPage(page, graphics.textColors);
     const hasTextLayer = extracted.charCount > 0 && !graphics.hiddenText;
     const useOcr = options.ocr === 'force' || (options.ocr === 'auto' && !hasTextLayer);
+    const noteLimit = () => limitedPages.push(index);
 
     if (options.ocr !== 'force' && isImageOnlyPage(graphics, hasTextLayer)) {
-      const [picture] = await collectPageImages(page, graphics.images, imageCache);
+      const [picture] = await collectPageImages(page, graphics.images, imageCache, noteLimit);
       if (picture) {
         pages.push({
           width: extracted.width,
@@ -262,7 +285,7 @@ async function convertLayout(
       }
     }
 
-    const images = await collectPageImages(page, graphics.images, imageCache);
+    const images = await collectPageImages(page, graphics.images, imageCache, noteLimit);
     const lines = hasTextLayer ? buildAnchoredLines(extracted.fragments) : [];
     const blocks: LayoutBlock[] = [];
 
@@ -289,10 +312,12 @@ async function convertLayout(
     await yieldToEventLoop();
   }
 
+  throwIfAborted(signal);
   const warnings: ConvertWarning[] = [];
   if (blankPages.length) warnings.push({ code: 'blank-pages', pages: blankPages });
   if (picturePages.length) warnings.push({ code: 'picture-pages', pages: picturePages });
   if (ocrPageNumbers.length) warnings.push({ code: 'ocr-pages', pages: ocrPageNumbers });
+  if (limitedPages.length) warnings.push({ code: 'image-limit', pages: limitedPages });
 
   report({ page: total, pages: total, phase: 'write' });
   const data = await packDocument(buildLayoutDocument(pages));
@@ -304,10 +329,18 @@ async function convertLayout(
   };
 }
 
-export async function convertPdf({ data, options, onProgress }: ConvertInput): Promise<ConvertResult> {  await ensurePdfjs();
+export async function convertPdf({
+  data,
+  options,
+  onProgress,
+  signal,
+}: ConvertInput): Promise<ConvertResult> {
+  await ensurePdfjs();
   const report = (progress: ConvertProgress) => onProgress?.(progress);
 
-  const task = getDocument({ data: new Uint8Array(data), ...pdfjsAssetOptions() });
+  throwIfAborted(signal);
+
+  const task = pdfjs.getDocument({ data: new Uint8Array(data), ...pdfjsAssetOptions() });
   let pdf: PDFDocumentProxy;
   try {
     pdf = await task.promise;
@@ -316,9 +349,9 @@ export async function convertPdf({ data, options, onProgress }: ConvertInput): P
   }
 
   try {
-    if (options.mode === 'visual') return await convertVisual(pdf, options, report);
-    if (options.mode === 'layout') return await convertLayout(pdf, options, report);
-    return await convertText(pdf, options, report);
+    if (options.mode === 'visual') return await convertVisual(pdf, options, report, signal);
+    if (options.mode === 'layout') return await convertLayout(pdf, options, report, signal);
+    return await convertText(pdf, options, report, signal);
   } finally {
     await task.destroy();
   }

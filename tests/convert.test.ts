@@ -140,8 +140,7 @@ describe('convertPdf (text mode)', () => {
     expect((xml.match(/<w:sectPr/g) ?? [])).toHaveLength(1);
   });
 
-  it('anchors pictures instead of reflowing them in layout mode', async () => {
-    const pdf = createImagePdf([
+  it('anchors pictures instead of reflowing them in layout mode', async () => {    const pdf = createImagePdf([
       {
         imageWidth: 32,
         imageHeight: 32,
@@ -160,6 +159,55 @@ describe('convertPdf (text mode)', () => {
     expect(xml).toContain('behindDoc="1"');
     expect(xml).toContain('<w:framePr');
     expect(await mediaFiles(result.blob)).toHaveLength(1);
+  });
+
+  it('keeps a stencil mask page instead of dropping it', async () => {
+    const pdf = createImagePdf([{ imageWidth: 32, imageHeight: 32, maskColor: [0, 0, 0] }]);
+
+    const result = await convertPdf({
+      data: pdf.buffer as ArrayBuffer,
+      options: { ...DEFAULT_OPTIONS, mode: 'text', ocr: 'off' },
+    });
+
+    const xml = await documentXml(result.blob);
+    expect(xml).toContain('<w:drawing>');
+    expect(await mediaFiles(result.blob)).toHaveLength(1);
+    expect(result.warnings).toEqual([{ code: 'picture-pages', pages: [1] }]);
+  });
+
+  it('lays a rotated page out in display space', async () => {    const pdf = createTestPdf(
+      [[{ text: 'Trang xoay', x: 72, y: PAGE_HEIGHT - 80, size: 24 }]],
+      { rotate: 90 },
+    );
+
+    const result = await convertPdf({
+      data: pdf.buffer as ArrayBuffer,
+      options: { ...DEFAULT_OPTIONS, mode: 'layout', ocr: 'off' },
+    });
+
+    // MediaBox 595x842 with /Rotate 90 displays as 842x595 (twips 16840x11900).
+    const xml = await documentXml(result.blob);
+    expect(xml).toContain('<w:pgSz w:w="16840" w:h="11900"');
+    expect(xml).toContain('Trang xoay');
+  });
+
+  it('keeps the text colour in both text and layout modes', async () => {
+    const pdf = createTestPdf([
+      [
+        { text: 'Doan mau do', x: 72, y: PAGE_HEIGHT - 80, size: 18, color: [1, 0, 0] },
+        { text: 'Doan mau xanh', x: 72, y: PAGE_HEIGHT - 120, size: 12, color: [0, 0, 1] },
+      ],
+    ]);
+
+    for (const mode of ['text', 'layout'] as const) {
+      const result = await convertPdf({
+        data: pdf.buffer.slice(0) as ArrayBuffer,
+        options: { ...DEFAULT_OPTIONS, mode, ocr: 'off' },
+      });
+      const xml = await documentXml(result.blob);
+      expect(xml, mode).toContain('<w:color w:val="FF0000"/>');
+      expect(xml, mode).toContain('<w:color w:val="0000FF"/>');
+    }
   });
 });
 

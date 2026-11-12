@@ -89,6 +89,12 @@ const vi: Record<MessageKey, string> = {
   'error.unreadablePdf': 'Không đọc được nội dung PDF.',
   'error.canvas': 'Trình duyệt không hỗ trợ canvas 2D.',
   'error.pageImage': 'Không thể tạo ảnh từ trang PDF.',
+  'error.oldBrowser':
+    'Trình duyệt này quá cũ để chuyển đổi. Hãy cập nhật Chrome, Edge, Firefox hoặc Safari.',
+  'action.cancel': 'Dừng',
+  'status.cancelled': 'Đã dừng',
+  'warning.imageLimit': 'Trang có hơn 60 hình chỉ giữ lại 60 hình đầu: {pages}.',
+  'error.ocr': 'Bước OCR bị lỗi. Kiểm tra kết nối mạng rồi thử lại.',
 };
 
 export default vi;

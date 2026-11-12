@@ -12,6 +12,8 @@ export interface PdfImagePage {
   imageHeight: number;
   /** Paints the image over the top half of the page instead of filling it. */
   topHalf?: boolean;
+  /** Paints a 1bpp stencil mask with this fill colour instead of an RGB image. */
+  maskColor?: [number, number, number];
 }
 
 const PAGE_WIDTH = 595;
@@ -30,6 +32,19 @@ function imagePixels(width: number, height: number): Uint8Array {
       pixels[offset] = Math.round((x / Math.max(1, width - 1)) * 255);
       pixels[offset + 1] = Math.round((y / Math.max(1, height - 1)) * 255);
       pixels[offset + 2] = 128;
+    }
+  }
+  return pixels;
+}
+
+/** 1bpp stencil: the left half paints (bit 0), the right half stays transparent (bit 1). */
+function maskPixels(width: number, height: number): Uint8Array {
+  const rowBytes = (width + 7) >> 3;
+  const pixels = new Uint8Array(rowBytes * height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x * 2 < width) continue;
+      pixels[y * rowBytes + (x >> 3)] |= 0x80 >> (x & 7);
     }
   }
   return pixels;
@@ -70,6 +85,7 @@ export function createImagePdf(pages: PdfImagePage[]): Uint8Array {
     const y = page.topHalf ? PAGE_HEIGHT / 2 : 0;
 
     const commands = [
+      page.maskColor ? `${page.maskColor.join(' ')} rg` : '',
       'q',
       `${PAGE_WIDTH} 0 0 ${height} 0 ${y} cm`,
       '/Im1 Do',
@@ -78,7 +94,9 @@ export function createImagePdf(pages: PdfImagePage[]): Uint8Array {
         (line) =>
           `BT /F1 ${line.size} Tf ${line.x} ${line.y} Td (${escapeText(line.text)}) Tj ET`,
       ),
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     objects.push(
       text(
@@ -89,11 +107,15 @@ export function createImagePdf(pages: PdfImagePage[]): Uint8Array {
     );
     objects.push(text(`<< /Length ${commands.length} >>\nstream\n${commands}\nendstream`));
 
-    const pixels = imagePixels(page.imageWidth, page.imageHeight);
-    const header = text(
-      `<< /Type /XObject /Subtype /Image /Width ${page.imageWidth} /Height ${page.imageHeight} ` +
-        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${pixels.length} >>\nstream\n`,
-    );
+    const pixels = page.maskColor
+      ? maskPixels(page.imageWidth, page.imageHeight)
+      : imagePixels(page.imageWidth, page.imageHeight);
+    const dictionary = page.maskColor
+      ? `<< /Type /XObject /Subtype /Image /Width ${page.imageWidth} /Height ${page.imageHeight} ` +
+        `/ImageMask true /BitsPerComponent 1 /Length ${pixels.length} >>`
+      : `<< /Type /XObject /Subtype /Image /Width ${page.imageWidth} /Height ${page.imageHeight} ` +
+        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${pixels.length} >>`;
+    const header = text(`${dictionary}\nstream\n`);
     const footer = text('\nendstream');
     const stream = new Uint8Array(header.length + pixels.length + footer.length);
     stream.set(header, 0);
